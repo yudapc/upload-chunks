@@ -29,7 +29,7 @@ var (
 	mu                         sync.Mutex           // Mutex untuk mengamankan akses ke receivedChunks
 	bucketName                 = "fsr-bucket"       // Replace with your bucket name
 	gcsKeyFilename             = "./gcp-key.json"   // Path ke file kunci Google Cloud Storage
-	isUploadToGCS              = true               // Ganti dengan true jika ingin mengupload ke Google Cloud Storage
+	isUploadToGCS              = false              // Ganti dengan true jika ingin mengupload ke Google Cloud Storage
 )
 
 func main() {
@@ -49,6 +49,7 @@ func main() {
 	e.POST("/upload", uploadChunk)
 	e.POST("/upload-screen-recording", uploadScreenRecordingChunk)
 	e.POST("/finalize", finalizeUploadScreenRecording)
+	e.Static("/files/uploads", uploadsDir)
 
 	// Jalankan server
 	e.Logger.Fatal(e.Start(":8080"))
@@ -181,10 +182,13 @@ func finalizeUpload(c echo.Context, totalChunks int, session string) error {
 	receivedChunks = make(map[int]bool)
 	mu.Unlock()
 
+	host := "http://localhost"
+	port := "8080"
+	finalFilePath = fmt.Sprintf("%s:%s/files/%s", host, port, finalFilePath)
+
 	return c.JSON(200, map[string]interface{}{
-		"message":  "Upload complete",
-		"fileName": finalFilePath,
-		"filePath": finalFilePath,
+		"message": "Upload complete",
+		"url":     finalFilePath,
 	})
 }
 
@@ -318,6 +322,10 @@ func finalizeUploadScreenRecording(c echo.Context) error {
 		if err != nil {
 			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Failed to generate signed URL"})
 		}
+	} else {
+		host := "http://localhost"
+		port := "8080"
+		url = fmt.Sprintf("%s:%s/files/%s", host, port, finalFilePath)
 	}
 
 	// Reset state

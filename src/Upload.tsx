@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect, FC } from "react";
 import axios from "axios";
 import Dropzone from "react-dropzone";
 
@@ -10,15 +10,19 @@ interface Chunk {
   fileChunk: Blob;
 }
 
-const Upload: React.FC = () => {
+interface IProps {
+  session: string;
+}
+
+const Upload: FC<IProps> = ({ session }) => {
   const [file, setFile] = useState<File | null>(null);
   const [uploadProgress, setUploadProgress] = useState<number>(0);
   const [isUploading, setIsUploading] = useState<boolean>(false);
   const [uploadedChunks, setUploadedChunks] = useState<Set<number>>(new Set());
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [finalFileName, setFinalFileName] = useState<string | null>(null);
+  const [fileFullUrl, setFileFullUrl] = useState<string>();
 
-  // Split file into chunks
   const splitFileIntoChunks = (file: File): Chunk[] => {
     const chunks: Chunk[] = [];
     let start = 0;
@@ -35,18 +39,17 @@ const Upload: React.FC = () => {
     return chunks;
   };
 
-  // Validate file type
   const validateFile = (file: File): boolean => {
-    const validTypes = ["video/mp4", "video/webm", "video/ogg"];
-    if (!validTypes.includes(file.type)) {
-      setErrorMessage("Invalid file type. Please upload a video file.");
-      return false;
-    }
+    // const validTypes = ["video/mp4", "video/webm", "video/ogg"];
+    // if (!validTypes.includes(file.type)) {
+    //   setErrorMessage("Invalid file type. Please upload a video file.");
+    //   return false;
+    // }
+    console.log('File Type: ', file.type);
     setErrorMessage(null);
     return true;
   };
 
-  // Handle file drop
   const handleFileDrop = (acceptedFiles: File[]) => {
     if (acceptedFiles && acceptedFiles.length > 0) {
       const selectedFile = acceptedFiles[0];
@@ -54,12 +57,11 @@ const Upload: React.FC = () => {
         setFile(selectedFile);
         setUploadedChunks(new Set());
         setUploadProgress(0);
-        setFinalFileName(null); // Reset state jika ada file sebelumnya
+        setFinalFileName(null);
       }
     }
   };
 
-  // Upload a single chunk
   const uploadChunk = async (
     chunk: Chunk,
     fileName: string,
@@ -69,13 +71,18 @@ const Upload: React.FC = () => {
     formData.append("chunkIndex", chunk.chunkIndex.toString());
     formData.append("videoChunk", chunk.fileChunk);
     formData.append("fileName", fileName);
-    formData.append("totalChunks", totalChunks.toString()); // Tambahkan total chunks
+    formData.append("totalChunks", totalChunks.toString());
+    formData.append("session", session);
 
     try {
-      await axios.post(
+      const response = await axios.post(
         "http://localhost:8080/upload",
         formData,
       );
+      console.log("Chunk uploaded successfully:", response.data);
+      if (response.data.url) {
+        setFileFullUrl(response.data.url);
+      }
       setUploadedChunks((prev) => new Set(prev).add(chunk.chunkIndex));
     } catch (error) {
       console.error(`Failed to upload chunk ${chunk.chunkIndex}`, error);
@@ -83,7 +90,6 @@ const Upload: React.FC = () => {
     }
   };
 
-  // Upload all chunks with resumable support
   const uploadChunks = async (chunks: Chunk[], fileName: string) => {
     setIsUploading(true);
 
@@ -94,13 +100,11 @@ const Upload: React.FC = () => {
         if (uploadedChunks.has(chunk.chunkIndex)) continue; // Skip already uploaded chunks
         await uploadChunk(chunk, fileName, chunks.length);
 
-        // Update progress
         uploadedChunksCount++;
         const progress = (uploadedChunksCount / chunks.length) * 100;
         setUploadProgress(progress);
       }
 
-      // Setelah semua chunks berhasil diunggah
       setUploadProgress(100);
     } catch (error) {
       setErrorMessage("An error occurred during upload. Please try again.");
@@ -109,7 +113,6 @@ const Upload: React.FC = () => {
     }
   };
 
-  // Start upload process
   const startUpload = () => {
     if (!file) return;
 
@@ -126,6 +129,8 @@ const Upload: React.FC = () => {
   return (
     <div style={{ padding: "20px", maxWidth: "600px", margin: "auto" }}>
       <h1>Video Uploader</h1>
+      <p>Session: {session}</p>
+      <p>File Full URL: {fileFullUrl}</p>
 
       {!file ? (
         <Dropzone onDrop={handleFileDrop}>

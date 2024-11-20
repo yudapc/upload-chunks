@@ -1,121 +1,26 @@
-import React, { useState, useRef } from "react";
-import { v4 as uuidv4 } from 'uuid';
+import { useScreenRecord } from "./hooks/useScreenRecord";
+import { FC } from 'react';
 
-const ScreenRecorder = () => {
-  const [recording, setRecording] = useState(false);
-  const [status, setStatus] = useState("Idle");
-  const [chunksUploaded, setChunksUploaded] = useState<number[]>([]);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const chunkCountRef = useRef(0); // Counter untuk jumlah chunk
-  const [uploadPromises, setUploadPromises] = useState<Promise<void>[]>([]);
-  const sessionIdRef = useRef<string>(uuidv4());
+interface IProps {
+  session: string;
+}
 
-  // Start screen and audio recording
-  const startRecording = async () => {
-    try {
-      setStatus("Initializing...");
-      const stream = await navigator.mediaDevices.getDisplayMedia({
-        video: true,
-        audio: true,
-      });
-
-      const audioStream = await navigator.mediaDevices.getUserMedia({
-        audio: true,
-      });
-
-      // Merge audio and video streams
-      const combinedStream = new MediaStream([
-        ...stream.getTracks(),
-        ...audioStream.getTracks(),
-      ]);
-
-      const mediaRecorder = new MediaRecorder(combinedStream, {
-        mimeType: "video/webm;codecs=vp9",
-      });
-
-      // Store MediaRecorder instance
-      mediaRecorderRef.current = mediaRecorder;
-
-      // Start recording and upload chunks
-      mediaRecorder.ondataavailable = handleDataAvailable;
-      mediaRecorder.start(1000); // Create chunks every 1 second
-
-      chunkCountRef.current = 0; // Reset chunk counter
-      setRecording(true);
-      setStatus("Recording...");
-      console.log("Recording started...");
-    } catch (error) {
-      console.error("Error starting recording:", error);
-      setStatus("Error starting recording");
-    }
-  };
-
-  // Stop recording
-  const stopRecording = async () => {
-    if (mediaRecorderRef.current) {
-      mediaRecorderRef.current.stop();
-      mediaRecorderRef.current = null;
-      setRecording(false);
-      setStatus("Stopped");
-
-      // Wait for all uploadChunk promises to resolve
-      await Promise.all(uploadPromises);
-
-      // Send totalChunks information after recording is stopped
-      const totalChunks = chunkCountRef.current;
-      console.log("Final totalChunks:", totalChunks);
-
-      try {
-        await fetch("http://localhost:8080/finalize", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ totalChunks, session: sessionIdRef.current }),
-        });
-        console.log("Finalization request sent successfully.");
-      } catch (error) {
-        console.error("Error finalizing recording:", error);
-      }
-    }
-  };
-
-  // Handle data chunks from MediaRecorder
-  const handleDataAvailable = async (event: BlobEvent) => {
-    if (event.data.size > 0) {
-      chunkCountRef.current += 1; // Increment chunk count
-      console.log("Chunk size:", event.data.size);
-      const uploadPromise = uploadChunk(event.data, chunkCountRef.current);
-      setUploadPromises((prev) => [...prev, uploadPromise]);
-    }
-  };
-
-  // Upload chunk to server
-  const uploadChunk = async (chunk: Blob, chunkIndex: number) => {
-    const formData = new FormData();
-    formData.append("videoChunk", chunk, `chunk_${chunkIndex}.webm`);
-    formData.append("chunkIndex", chunkIndex.toString());
-    formData.append("session", sessionIdRef.current);
-
-    try {
-      const response = await fetch("http://localhost:8080/upload-screen-recording", {
-        method: "POST",
-        body: formData,
-      });
-
-      if (response.ok) {
-        console.log(`Chunk ${chunkIndex} uploaded successfully`);
-        setChunksUploaded((prev) => [...prev, chunkIndex]);
-      } else {
-        console.error("Failed to upload chunk", await response.text());
-      }
-    } catch (error) {
-      console.error("Error uploading chunk:", error);
-    }
-  };
+const ScreenRecorder: FC<IProps> = ({ session }) => {
+  const {
+    startRecording,
+    stopRecording,
+    recording,
+    status,
+    chunksUploaded,
+    fileFullUrl,
+  } = useScreenRecord(session);
 
   return (
-    <div>
+    <div style={{ padding: "20px", maxWidth: "600px", margin: "auto" }}>
       <h1>Screen & Audio Recorder</h1>
+      <p>Session: {session}</p>
       <p>Status: {status}</p>
+      <p>File Full URL: {fileFullUrl}</p>
       <button onClick={startRecording} disabled={recording}>
         Start Recording
       </button>
