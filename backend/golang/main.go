@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -9,17 +10,21 @@ import (
 	"strconv"
 	"sync"
 
+	"cloud.google.com/go/storage"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
+	"google.golang.org/api/option"
 )
 
 var (
 	uploadsDir     = "uploads"          // Folder untuk menyimpan video final
 	tempChunksDir  = "temp_chunks"      // Folder sementara untuk menyimpan chunks
-	writeStream    *os.File             // Stream untuk menulis file final
 	receivedChunks = make(map[int]bool) // Melacak chunks yang diterima
 	mu             sync.Mutex           // Mutex untuk mengamankan akses ke receivedChunks
+	bucketName     = "fsr-bucket"       // Replace with your bucket name
+	gcsKeyFilename = "./gcp-key.json"   // Path ke file kunci Google Cloud Storage
+	isUploadToGCS  = false              // Ganti dengan true jika ingin mengupload ke Google Cloud Storage
 )
 
 func main() {
@@ -135,6 +140,32 @@ func finalizeUpload(c echo.Context, totalChunks int) error {
 	writer.Flush()
 
 	fmt.Printf("Final video saved as %s\n", finalFilePath)
+
+	if isUploadToGCS {
+		// Upload file ke Google Cloud Storage
+		ctx := context.Background()
+		client, err := storage.NewClient(ctx, option.WithCredentialsFile(gcsKeyFilename))
+		if err != nil {
+			return c.JSON(500, map[string]string{"error": "Failed to create Google Cloud Storage client"})
+		}
+		defer client.Close()
+
+		bucket := client.Bucket(bucketName)
+		object := bucket.Object(path.Join("testing", path.Base(finalFilePath)))
+		wc := object.NewWriter(ctx)
+		finalFile.Seek(0, io.SeekStart) // Reset file pointer to the beginning
+		if _, err := io.Copy(wc, finalFile); err != nil {
+			return c.JSON(500, map[string]string{"error": "Failed to upload file to Google Cloud Storage"})
+		}
+		if err := wc.Close(); err != nil {
+			return c.JSON(500, map[string]string{"error": "Failed to close Google Cloud Storage writer"})
+		}
+
+		// Delete the file from the uploads directory after successful upload
+		if err := os.Remove(finalFilePath); err != nil {
+			return c.JSON(500, map[string]string{"error": "Failed to delete file from uploads directory"})
+		}
+	}
 
 	// Reset state
 	mu.Lock()
