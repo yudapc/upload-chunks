@@ -22,13 +22,14 @@ import (
 )
 
 var (
-	uploadsDir     = "uploads"          // Folder untuk menyimpan video final
-	tempChunksDir  = "temp_chunks"      // Folder sementara untuk menyimpan chunks
-	receivedChunks = make(map[int]bool) // Melacak chunks yang diterima
-	mu             sync.Mutex           // Mutex untuk mengamankan akses ke receivedChunks
-	bucketName     = "fsr-bucket"       // Replace with your bucket name
-	gcsKeyFilename = "./gcp-key.json"   // Path ke file kunci Google Cloud Storage
-	isUploadToGCS  = true               // Ganti dengan true jika ingin mengupload ke Google Cloud Storage
+	uploadsDir                 = "uploads"          // Folder untuk menyimpan video final
+	tempChunksDir              = "temp_chunks"      // Folder sementara untuk menyimpan chunks
+	receivedChunks             = make(map[int]bool) // Melacak chunks yang diterima
+	receivedScreenRecordChunks = make(map[int]bool) // Melacak chunks yang diterima
+	mu                         sync.Mutex           // Mutex untuk mengamankan akses ke receivedChunks
+	bucketName                 = "fsr-bucket"       // Replace with your bucket name
+	gcsKeyFilename             = "./gcp-key.json"   // Path ke file kunci Google Cloud Storage
+	isUploadToGCS              = true               // Ganti dengan true jika ingin mengupload ke Google Cloud Storage
 )
 
 func main() {
@@ -66,6 +67,8 @@ func uploadChunk(c echo.Context) error {
 		return c.JSON(400, map[string]string{"error": "Invalid totalChunks"})
 	}
 
+	session := c.FormValue("session")
+
 	// Mendapatkan file chunk dari request
 	file, err := c.FormFile("videoChunk")
 	if err != nil {
@@ -80,7 +83,7 @@ func uploadChunk(c echo.Context) error {
 	defer src.Close()
 
 	// Simpan chunk ke folder sementara
-	chunkPath := path.Join(tempChunksDir, fmt.Sprintf("chunk_%d", chunkIndex))
+	chunkPath := path.Join(tempChunksDir, fmt.Sprintf("%s_chunk_%d", session, chunkIndex))
 	dst, err := os.Create(chunkPath)
 	if err != nil {
 		return c.JSON(500, map[string]string{"error": "Failed to save chunk"})
@@ -105,14 +108,14 @@ func uploadChunk(c echo.Context) error {
 	mu.Unlock()
 
 	if allReceived {
-		return finalizeUpload(c, totalChunks)
+		return finalizeUpload(c, totalChunks, session)
 	}
 
 	return c.JSON(200, map[string]string{"message": fmt.Sprintf("Chunk %d received", chunkIndex)})
 }
 
 // finalizeUpload menggabungkan semua chunk menjadi satu file
-func finalizeUpload(c echo.Context, totalChunks int) error {
+func finalizeUpload(c echo.Context, totalChunks int, session string) error {
 	finalFilePath := path.Join(uploadsDir, fmt.Sprintf("%s_final_video.webm", uuid.New().String()))
 
 	// Buka file untuk menulis file final
@@ -125,7 +128,7 @@ func finalizeUpload(c echo.Context, totalChunks int) error {
 	// Gabungkan semua chunk
 	writer := bufio.NewWriter(finalFile)
 	for i := 0; i < totalChunks; i++ {
-		chunkPath := path.Join(tempChunksDir, fmt.Sprintf("chunk_%d", i))
+		chunkPath := path.Join(tempChunksDir, fmt.Sprintf("%s_chunk_%d", session, i))
 		chunkFile, err := os.Open(chunkPath)
 		if err != nil {
 			return c.JSON(500, map[string]string{"error": fmt.Sprintf("Failed to open chunk %d", i)})
@@ -219,7 +222,7 @@ func uploadScreenRecordingChunk(c echo.Context) error {
 
 	// Track received chunk
 	index, _ := strconv.Atoi(chunkIndex)
-	receivedChunks[index] = true
+	receivedScreenRecordChunks[index] = true
 	fmt.Println("Received chunk:", chunkIndex)
 
 	return c.String(http.StatusOK, fmt.Sprintf("Chunk %s uploaded", chunkIndex))
@@ -238,7 +241,7 @@ func finalizeUploadScreenRecording(c echo.Context) error {
 
 	// Check if all chunks are uploaded
 	for i := 1; i <= req.TotalChunks; i++ {
-		if !receivedChunks[i] {
+		if !receivedScreenRecordChunks[i] {
 			return c.String(http.StatusBadRequest, "Missing chunks")
 		}
 	}
