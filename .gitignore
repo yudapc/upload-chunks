@@ -129,6 +129,8 @@ dist
 .yarn/install-state.gz
 .pnp.*
 
-backend/temp_chunks
-backend/uploads
-backend/node_modules
+backend/nodejs/temp_chunks
+backend/nodejs/uploads
+backend/nodejs/node_modules
+backend/golang/temp_chunks
+backend/golang/uploads

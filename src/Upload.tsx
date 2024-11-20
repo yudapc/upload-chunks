@@ -73,7 +73,7 @@ const Upload: React.FC = () => {
 
     try {
       await axios.post(
-        "https://47883b04-eda5-49d8-857e-200bfa1c6f56-00-cvycpy6ts6gi.worf.replit.dev:8080/upload",
+        "http://localhost:8080/upload",
         formData,
       );
       setUploadedChunks((prev) => new Set(prev).add(chunk.chunkIndex));
