@@ -1,4 +1,5 @@
 import React, { useState, useRef } from "react";
+import { v4 as uuidv4 } from 'uuid';
 
 const ScreenRecorder = () => {
   const [recording, setRecording] = useState(false);
@@ -7,6 +8,7 @@ const ScreenRecorder = () => {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunkCountRef = useRef(0); // Counter untuk jumlah chunk
   const [uploadPromises, setUploadPromises] = useState<Promise<void>[]>([]);
+  const sessionIdRef = useRef<string>(uuidv4());
 
   // Start screen and audio recording
   const startRecording = async () => {
@@ -67,7 +69,7 @@ const ScreenRecorder = () => {
         await fetch("http://localhost:8080/finalize", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ totalChunks }),
+          body: JSON.stringify({ totalChunks, session: sessionIdRef.current }),
         });
         console.log("Finalization request sent successfully.");
       } catch (error) {
@@ -91,6 +93,7 @@ const ScreenRecorder = () => {
     const formData = new FormData();
     formData.append("videoChunk", chunk, `chunk_${chunkIndex}.webm`);
     formData.append("chunkIndex", chunkIndex.toString());
+    formData.append("session", sessionIdRef.current);
 
     try {
       const response = await fetch("http://localhost:8080/upload-screen-recording", {

@@ -187,18 +187,20 @@ func finalizeUpload(c echo.Context, totalChunks int) error {
 
 // Screen Recording
 type FinalizeRequest struct {
-	TotalChunks int `json:"totalChunks"`
+	TotalChunks int    `json:"totalChunks"`
+	Session     string `json:"session"`
 }
 
 func uploadScreenRecordingChunk(c echo.Context) error {
 	chunkIndex := c.FormValue("chunkIndex")
+	session := c.FormValue("session")
 	file, err := c.FormFile("videoChunk")
 	if err != nil {
 		return c.String(http.StatusBadRequest, "Failed to parse chunk")
 	}
 
 	// Save chunk
-	chunkPath := filepath.Join("temp_chunks", "chunk_"+chunkIndex+".webm")
+	chunkPath := filepath.Join("temp_chunks", session+"_chunk_"+chunkIndex+".webm")
 	src, err := file.Open()
 	if err != nil {
 		return err
@@ -232,6 +234,7 @@ func finalizeUploadScreenRecording(c echo.Context) error {
 	fmt.Println("Finalizing upload with totalChunks:", req.TotalChunks)
 
 	totalChunks := req.TotalChunks
+	session := req.Session
 
 	// Check if all chunks are uploaded
 	for i := 1; i <= req.TotalChunks; i++ {
@@ -240,7 +243,14 @@ func finalizeUploadScreenRecording(c echo.Context) error {
 		}
 	}
 
-	finalFilePath := path.Join(uploadsDir, fmt.Sprintf("%s_final_video.webm", uuid.New().String()))
+	// finalFilePath := path.Join(uploadsDir, fmt.Sprintf("%s/%s_final_video.webm", session, uuid.New().String()))
+	finalDir := path.Join(uploadsDir, session)
+	finalFilePath := path.Join(finalDir, fmt.Sprintf("%s_final_video.webm", uuid.New().String()))
+
+	// Buat direktori jika belum ada
+	if err := os.MkdirAll(finalDir, os.ModePerm); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Failed to create directory"})
+	}
 
 	// Buka file untuk menulis file final
 	finalFile, err := os.Create(finalFilePath)
@@ -252,7 +262,7 @@ func finalizeUploadScreenRecording(c echo.Context) error {
 	// Gabungkan semua chunk
 	writer := bufio.NewWriter(finalFile)
 	for i := 1; i < totalChunks; i++ {
-		chunkPath := path.Join(tempChunksDir, fmt.Sprintf("chunk_%d.webm", i))
+		chunkPath := path.Join(tempChunksDir, fmt.Sprintf("%s_chunk_%d.webm", session, i))
 		chunkFile, err := os.Open(chunkPath)
 		if err != nil {
 			return c.JSON(500, map[string]string{"error": fmt.Sprintf("Failed to open chunk %d", i)})
