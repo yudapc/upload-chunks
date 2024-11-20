@@ -5,8 +5,10 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path"
+	"path/filepath"
 	"strconv"
 	"sync"
 
@@ -24,7 +26,7 @@ var (
 	mu             sync.Mutex           // Mutex untuk mengamankan akses ke receivedChunks
 	bucketName     = "fsr-bucket"       // Replace with your bucket name
 	gcsKeyFilename = "./gcp-key.json"   // Path ke file kunci Google Cloud Storage
-	isUploadToGCS  = false              // Ganti dengan true jika ingin mengupload ke Google Cloud Storage
+	isUploadToGCS  = true               // Ganti dengan true jika ingin mengupload ke Google Cloud Storage
 )
 
 func main() {
@@ -42,6 +44,8 @@ func main() {
 
 	// Endpoint untuk upload chunk
 	e.POST("/upload", uploadChunk)
+	e.POST("/upload-screen-recording", uploadScreenRecordingChunk)
+	e.POST("/finalize", finalizeUploadScreenRecording)
 
 	// Jalankan server
 	e.Logger.Fatal(e.Start(":8080"))
@@ -177,6 +181,129 @@ func finalizeUpload(c echo.Context, totalChunks int) error {
 		"fileName": finalFilePath,
 		"filePath": finalFilePath,
 	})
+}
+
+// Screen Recording
+type FinalizeRequest struct {
+	TotalChunks int `json:"totalChunks"`
+}
+
+func uploadScreenRecordingChunk(c echo.Context) error {
+	chunkIndex := c.FormValue("chunkIndex")
+	file, err := c.FormFile("videoChunk")
+	if err != nil {
+		return c.String(http.StatusBadRequest, "Failed to parse chunk")
+	}
+
+	// Save chunk
+	chunkPath := filepath.Join("temp_chunks", "chunk_"+chunkIndex+".webm")
+	src, err := file.Open()
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+
+	dst, err := os.Create(chunkPath)
+	if err != nil {
+		return err
+	}
+	defer dst.Close()
+
+	if _, err := dst.ReadFrom(src); err != nil {
+		return err
+	}
+
+	// Track received chunk
+	index, _ := strconv.Atoi(chunkIndex)
+	receivedChunks[index] = true
+	fmt.Println("Received chunk:", chunkIndex)
+
+	return c.String(http.StatusOK, fmt.Sprintf("Chunk %s uploaded", chunkIndex))
+}
+
+func finalizeUploadScreenRecording(c echo.Context) error {
+	req := new(FinalizeRequest)
+	if err := c.Bind(req); err != nil {
+		return err
+	}
+
+	fmt.Println("Finalizing upload with totalChunks:", req.TotalChunks)
+
+	totalChunks := req.TotalChunks
+
+	// Check if all chunks are uploaded
+	for i := 1; i <= req.TotalChunks; i++ {
+		if !receivedChunks[i] {
+			return c.String(http.StatusBadRequest, "Missing chunks")
+		}
+	}
+
+	finalFilePath := path.Join(uploadsDir, fmt.Sprintf("%s_final_video.webm", uuid.New().String()))
+
+	// Buka file untuk menulis file final
+	finalFile, err := os.Create(finalFilePath)
+	if err != nil {
+		return c.JSON(500, map[string]string{"error": "Failed to create final file"})
+	}
+	defer finalFile.Close()
+
+	// Gabungkan semua chunk
+	writer := bufio.NewWriter(finalFile)
+	for i := 1; i < totalChunks; i++ {
+		chunkPath := path.Join(tempChunksDir, fmt.Sprintf("chunk_%d.webm", i))
+		chunkFile, err := os.Open(chunkPath)
+		if err != nil {
+			return c.JSON(500, map[string]string{"error": fmt.Sprintf("Failed to open chunk %d", i)})
+		}
+
+		// Salin isi chunk ke file final
+		if _, err := io.Copy(writer, chunkFile); err != nil {
+			chunkFile.Close()
+			return c.JSON(500, map[string]string{"error": fmt.Sprintf("Failed to merge chunk %d", i)})
+		}
+		chunkFile.Close()
+
+		// Hapus chunk setelah digabung
+		os.Remove(chunkPath)
+	}
+
+	// Selesaikan penulisan file final
+	writer.Flush()
+
+	fmt.Printf("Final video saved as %s\n", finalFilePath)
+
+	if isUploadToGCS {
+		// Upload file ke Google Cloud Storage
+		ctx := context.Background()
+		client, err := storage.NewClient(ctx, option.WithCredentialsFile(gcsKeyFilename))
+		if err != nil {
+			return c.JSON(500, map[string]string{"error": "Failed to create Google Cloud Storage client"})
+		}
+		defer client.Close()
+
+		bucket := client.Bucket(bucketName)
+		object := bucket.Object(path.Join("testing", path.Base(finalFilePath)))
+		wc := object.NewWriter(ctx)
+		finalFile.Seek(0, io.SeekStart) // Reset file pointer to the beginning
+		if _, err := io.Copy(wc, finalFile); err != nil {
+			return c.JSON(500, map[string]string{"error": "Failed to upload file to Google Cloud Storage"})
+		}
+		if err := wc.Close(); err != nil {
+			return c.JSON(500, map[string]string{"error": "Failed to close Google Cloud Storage writer"})
+		}
+
+		// Delete the file from the uploads directory after successful upload
+		if err := os.Remove(finalFilePath); err != nil {
+			return c.JSON(500, map[string]string{"error": "Failed to delete file from uploads directory"})
+		}
+	}
+
+	// Reset state
+	mu.Lock()
+	receivedChunks = make(map[int]bool)
+	mu.Unlock()
+
+	return c.String(http.StatusOK, "Upload finalized")
 }
 
 // ensureDir memastikan direktori ada, jika tidak akan membuatnya
