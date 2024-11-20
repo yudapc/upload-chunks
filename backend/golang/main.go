@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync"
+	"time"
 
 	"cloud.google.com/go/storage"
 	"github.com/google/uuid"
@@ -271,6 +273,7 @@ func finalizeUploadScreenRecording(c echo.Context) error {
 	writer.Flush()
 
 	fmt.Printf("Final video saved as %s\n", finalFilePath)
+	var url string
 
 	if isUploadToGCS {
 		// Upload file ke Google Cloud Storage
@@ -296,6 +299,12 @@ func finalizeUploadScreenRecording(c echo.Context) error {
 		if err := os.Remove(finalFilePath); err != nil {
 			return c.JSON(500, map[string]string{"error": "Failed to delete file from uploads directory"})
 		}
+
+		// Generate signed URL
+		url, err = generateSignedURL(bucketName, object.ObjectName(), client)
+		if err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Failed to generate signed URL"})
+		}
 	}
 
 	// Reset state
@@ -303,7 +312,22 @@ func finalizeUploadScreenRecording(c echo.Context) error {
 	receivedChunks = make(map[int]bool)
 	mu.Unlock()
 
-	return c.String(http.StatusOK, "Upload finalized")
+	response := map[string]string{"url": url, "message": "Upload complete"}
+	responseJSON, _ := json.Marshal(response)
+	return c.String(http.StatusOK, string(responseJSON))
+}
+
+func generateSignedURL(bucketName, objectName string, client *storage.Client) (string, error) {
+	opts := &storage.SignedURLOptions{
+		Scheme:  storage.SigningSchemeV4,
+		Method:  "GET",
+		Expires: time.Now().Add(15 * time.Minute), // URL valid for 15 minutes
+	}
+	url, err := client.Bucket(bucketName).SignedURL(objectName, opts)
+	if err != nil {
+		return "", fmt.Errorf("unable to generate signed URL: %w", err)
+	}
+	return url, nil
 }
 
 // ensureDir memastikan direktori ada, jika tidak akan membuatnya
