@@ -134,3 +134,4 @@ backend/nodejs/uploads
 backend/nodejs/node_modules
 backend/golang/temp_chunks
 backend/golang/uploads
+backend/golang/gcp-key.json
