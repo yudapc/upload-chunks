@@ -50,8 +50,10 @@ func main() {
 	e.POST("/upload", uploadChunk)
 	e.POST("/upload-screen-recording", uploadScreenRecordingChunk)
 	e.POST("/finalize", finalizeUploadScreenRecording)
-	e.GET("/screen-recording/:session", getScreenRecordingUrl)
 	e.Static("/files/uploads", uploadsDir)
+	e.GET("/", func(c echo.Context) error {
+		return c.String(http.StatusOK, "Welcome to the file upload service!")
+	})
 
 	// Jalankan server
 	e.Logger.Fatal(e.Start(":8080"))
